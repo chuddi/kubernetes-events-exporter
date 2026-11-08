@@ -37,7 +37,9 @@ helm uninstall kubernetes-events-exporter --namespace monitoring
 | `serviceAccount.create` | bool | `true` | Create a ServiceAccount |
 | `serviceAccount.annotations` | object | `{}` | ServiceAccount annotations (e.g. for IAM roles) |
 | `serviceAccount.name` | string | `""` | ServiceAccount name (generated from fullname if empty) |
-| `rbac.create` | bool | `true` | Create ClusterRole and ClusterRoleBinding for reading events |
+| `rbac.create` | bool | `true` | Create the RBAC objects below (see [Permissions](#permissions)) |
+| `rbac.rules` | list | `get` on common kinds | Read access used to add the involved object's labels, annotations and owners to each event. Secrets and ConfigMaps are not included |
+| `rbac.extraRules` | list | `[]` | Extra rules appended to `rbac.rules`, for example CRDs your events reference |
 | `podAnnotations` | object | Prometheus scrape annotations | Annotations added to pods |
 | `podLabels` | object | `{}` | Labels added to pods |
 | `podSecurityContext` | object | `runAsNonRoot: true` | Pod-level security context |
@@ -51,7 +53,7 @@ helm uninstall kubernetes-events-exporter --namespace monitoring
 | `serviceMonitor.enabled` | bool | `false` | Create a Prometheus ServiceMonitor |
 | `serviceMonitor.interval` | string | `nil` | Scrape interval |
 | `serviceMonitor.additionalLabels` | object | `nil` | Extra labels on the ServiceMonitor |
-| `leaderElection.enabled` | bool | `false` | Enable leader election for HA deployments |
+| `leaderElection.enabled` | bool | `false` | Enable leader election for HA deployments. Sets `config.leaderElection.enabled` and creates a Role for the lease |
 | `extraEnv` | list | `[]` | Extra environment variables (for secrets, see example below) |
 | `extraVolumes` | list | `[]` | Extra volumes (e.g. TLS certs) |
 | `extraVolumeMounts` | list | `[]` | Extra volume mounts |
@@ -72,8 +74,39 @@ The `config` block maps directly to the exporter's YAML configuration:
 | `config.clusterEnvironment` | string | `""` | Tag events with an environment label |
 | `config.kubeQPS` | int | `nil` | K8s API rate limit (QPS) |
 | `config.kubeBurst` | int | `nil` | K8s API rate limit (burst) |
+| `config.namespace` | string | `""` | Watch one namespace only. RBAC becomes a Role in that namespace |
+| `config.omitLookup` | bool | `false` | Skip metadata enrichment. RBAC is reduced to reading events |
 | `config.route` | object | Match all to `dump` | Routing tree (see main README for details) |
 | `config.receivers` | list | stdout dump | List of receiver/sink configurations |
+
+## Permissions
+
+The chart always grants `get`, `list` and `watch` on events. By default it also
+grants `get` on the objects events are usually about (pods, nodes, services,
+endpoints, PVCs, PVs, namespaces, deployments, replica sets, stateful sets,
+daemon sets, jobs, cron jobs, HPAs, PDBs, ingresses, endpoint slices), so each
+event can carry that object's labels, annotations and owner references.
+
+It never grants access to Secrets or ConfigMaps. Events about a kind that is not
+in the list are still exported, just without that metadata.
+
+- To enrich events about CRDs, add them with `rbac.extraRules`.
+- To grant events only, set `config.omitLookup: true`.
+- To stay inside one namespace, set `config.namespace`. The chart then creates a
+  Role and RoleBinding in that namespace instead of a ClusterRole.
+- To manage RBAC yourself, set `rbac.create: false` and point
+  `serviceAccount.name` at an existing ServiceAccount.
+
+With leader election on, a separate Role in the release namespace allows `get`,
+`create` and `update` on leases.
+
+```yaml
+rbac:
+  extraRules:
+    - apiGroups: ["cert-manager.io"]
+      resources: [certificates]
+      verbs: ["get"]
+```
 
 ## Examples
 
@@ -131,6 +164,7 @@ config:
     - name: "prometheus"
       prometheus:
         eventsMetricsNamePrefix: "event_exporter_"
+        metricExpirationSeconds: 60 # optional; if omitted, inherits config.maxEventAgeSeconds
         reasonFilter:
           Pod:
             - "FailedScheduling"
@@ -139,13 +173,13 @@ config:
             - "SuccessfulCreate"
 ```
 
-This configuration produces a single metric named `event_exporter_event_count` with labels: `kind`, `name`, `namespace`, `reason`, and `source_component`.
+This configuration produces a single metric named `event_exporter_event_count` with labels: `name`, `namespace`, `involved_object_namespace`, `involved_object_name`, `involved_object_kind`, `reason`, `type`, and `source`.
 
 Example series:
 
 ```text
-event_exporter_event_count{kind="pod",name="nginx-abc",namespace="default",reason="FailedScheduling",source_component="kubelet"}
-event_exporter_event_count{kind="replicaset",name="web-6f6c9d",namespace="apps",reason="FailedCreate",source_component="replicaset-controller"}
+event_exporter_event_count{name="nginx-abc.18abb4535003c611",namespace="default",involved_object_namespace="default",involved_object_name="nginx-abc",involved_object_kind="Pod",reason="FailedScheduling",type="Warning",source="node-01/kubelet"}
+event_exporter_event_count{name="web-6f6c9d.18abb4535003d222",namespace="apps",involved_object_namespace="apps",involved_object_name="web-6f6c9d",involved_object_kind="ReplicaSet",reason="FailedCreate",type="Warning",source="controller-manager/replicaset-controller"}
 ```
 
 ### HA deployment with leader election
