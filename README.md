@@ -2,7 +2,7 @@
 
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/kubernetes-events-exporter)](https://artifacthub.io/packages/search?repo=kubernetes-events-exporter)
 
-> **Actively maintained fork** of [resmoio/kubernetes-events-exporter](https://github.com/resmoio/kubernetes-events-exporter) (itself a fork of the original [Opsgenie exporter](https://github.com/opsgenie/kubernetes-events-exporter)). The upstream repository has been dormant since Resmo was acquired by JumpCloud in 2024. This fork consolidates the best fixes and features from multiple community forks (ClickHouse, LinkedIn, honestica) into a single, maintained project.
+> **Actively maintained fork**, by [Ownkube](https://ownkube.io), of [resmoio/kubernetes-events-exporter](https://github.com/resmoio/kubernetes-events-exporter) (itself a fork of the original [Opsgenie exporter](https://github.com/opsgenie/kubernetes-events-exporter)). The upstream repository has been dormant since Resmo was acquired by JumpCloud in 2024. This fork consolidates the best fixes and features from multiple community forks (ClickHouse, LinkedIn, honestica) into a single, maintained project.
 
 This tool allows exporting the often missed Kubernetes events to various outputs so that they can be used for
 observability or alerting purposes. You won't believe what you are missing.
@@ -66,6 +66,12 @@ config:
 See [`charts/kubernetes-events-exporter/values.yaml`](charts/kubernetes-events-exporter/values.yaml) for all options including resources, tolerations, serviceMonitor, and leader election.
 
 > **Note:** The Bitnami Helm chart was deprecated in August 2025. This is the replacement first-party chart.
+
+**Permissions.** The chart grants read access to events plus `get` on common
+kinds (pods, nodes, deployments and so on) for metadata enrichment. It never
+grants access to Secrets or ConfigMaps. Use `rbac.extraRules` to add CRDs,
+`config.omitLookup: true` for events only, or `config.namespace` for a
+namespaced Role. See the [chart README](charts/kubernetes-events-exporter/README.md#permissions).
 
 ## Configuration
 
